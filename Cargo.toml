@@ -1,0 +1,12 @@
+[package]
+name = "raftkv"
+version = "0.1.0"
+authors = ["siddontang <siddontang@gmail.com>"]
+
+[dependencies]
+
+[dependencies.tikv]
+git = "https://github.com/pingcap/tikv.git"
+
+[dependencies.rocksdb]
+git = "https://github.com/pingcap/rust-rocksdb.git"
