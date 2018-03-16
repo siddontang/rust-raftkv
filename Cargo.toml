@@ -1,12 +1,12 @@
 [package]
-name = "raftkv"
+name = "raft-example"
 version = "0.1.0"
 authors = ["siddontang <siddontang@gmail.com>"]
 
 [dependencies]
-
-[dependencies.tikv]
-git = "https://github.com/pingcap/tikv.git"
-
-[dependencies.rocksdb]
-git = "https://github.com/pingcap/rust-rocksdb.git"
+raft = "0.1"
+sled = "0.15.13"
+log = "0.4"
+clap = "2.31.1"
+rocket = "0.3.6"
+rocket_codegen = "0.3.6"
