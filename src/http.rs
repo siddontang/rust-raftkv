@@ -6,6 +6,7 @@ use std::time::Duration;
 use rocket::config::{Config, Environment};
 use rocket::http::Status;
 use rocket::{self, State};
+use rocket::response::status::{Custom, NotFound};
 use protobuf::{Message, MessageStatic};
 use raft::eraftpb::Message as RaftMessage;
 use crossbeam_channel::{self, Sender};
@@ -48,17 +49,17 @@ impl RaftServer {
 }
 
 #[get("/local_kv/<key>")]
-fn local_kv_get(state: State<RaftServer>, key: String) -> Result<String, Status> {
+fn local_kv_get(state: State<RaftServer>, key: String) -> Result<String, NotFound<String>> {
     let s = state;
     if let Some(v) = s.db.get(&data_key(key.as_bytes())).unwrap() {
         return Ok(v.to_utf8().unwrap().to_string());
     }
 
-    Err(Status::NotFound)
+    Err(NotFound(format!("{} is not found", key)))
 }
 
 #[get("/kv/<key>")]
-fn kv_get(state: State<RaftServer>, key: String) -> Result<String, Status> {
+fn kv_get(state: State<RaftServer>, key: String) -> Result<String, Custom<String>> {
     let s = state;
     let req = Request {
         op: 1,
@@ -72,21 +73,24 @@ fn kv_get(state: State<RaftServer>, key: String) -> Result<String, Status> {
     let resp = s.do_request(req);
     if resp.ok {
         match resp.value {
-            None => return Err(Status::NotFound),
+            None => return Err(Custom(Status::NotFound, format!("{} is not found", key))),
             Some(v) => return Ok(String::from_utf8(v).unwrap()),
         }
     }
 
-    Err(Status::InternalServerError)
+    Err(Custom(
+        Status::InternalServerError,
+        format!("meet server error when get {}", key),
+    ))
 }
 
 #[put("/kv/<key>", data = "<value>")]
-fn kv_put(state: State<RaftServer>, key: String, value: String) -> Result<(), Status> {
+fn kv_put(state: State<RaftServer>, key: String, value: String) -> Result<(), Custom<String>> {
     kv_post(state, key, value)
 }
 
 #[post("/kv/<key>", data = "<value>")]
-fn kv_post(state: State<RaftServer>, key: String, value: String) -> Result<(), Status> {
+fn kv_post(state: State<RaftServer>, key: String, value: String) -> Result<(), Custom<String>> {
     let s = state;
     let req = Request {
         op: 2,
@@ -101,12 +105,15 @@ fn kv_post(state: State<RaftServer>, key: String, value: String) -> Result<(), S
     if resp.ok {
         Ok(())
     } else {
-        Err(Status::InternalServerError)
+        Err(Custom(
+            Status::InternalServerError,
+            format!("meet server error when get {}", key),
+        ))
     }
 }
 
 #[delete("/kv/<key>")]
-fn kv_delete(state: State<RaftServer>, key: String) -> Result<(), Status> {
+fn kv_delete(state: State<RaftServer>, key: String) -> Result<(), Custom<String>> {
     let s = state;
     let req = Request {
         op: 3,
@@ -121,7 +128,10 @@ fn kv_delete(state: State<RaftServer>, key: String) -> Result<(), Status> {
     if resp.ok {
         Ok(())
     } else {
-        Err(Status::InternalServerError)
+        Err(Custom(
+            Status::InternalServerError,
+            format!("meet server error when get {}", key),
+        ))
     }
 }
 

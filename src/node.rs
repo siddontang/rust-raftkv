@@ -116,10 +116,16 @@ impl Node {
 
         // There is a snapshot, we need to apply it.
         if !raft::is_empty_snap(&ready.snapshot) {
+            debug!("{} begin to apply snapshot", self.tag);
             self.r.mut_store().apply_snapshot(&wb, &ready.snapshot);
         }
 
         if !ready.entries.is_empty() {
+            debug!(
+                "{} begin to append {} entries",
+                self.tag,
+                ready.entries.len()
+            );
             self.r.mut_store().append(&wb, &ready.entries);
         }
 
@@ -141,7 +147,17 @@ impl Node {
         }
 
         if let Some(committed_entries) = ready.committed_entries.take() {
+            if !committed_entries.is_empty() {
+                debug!(
+                    "{} begin to apply {} committed entries",
+                    self.tag,
+                    committed_entries.len()
+                );
+            }
+            let mut last_applying_idx = 0;
+
             for entry in committed_entries {
+                last_applying_idx = entry.get_index();
                 if entry.get_data().is_empty() {
                     continue;
                 }
@@ -151,23 +167,25 @@ impl Node {
                     self.on_request(request);
                 }
             }
+
+            if last_applying_idx > 0 {
+                put_u64(&*self.db, RAFT_APPLY_INDEX_KEY, last_applying_idx);
+            }
         }
 
         self.r.advance(ready);
     }
 
     fn on_request(&mut self, req: Request) {
-        let cb = self.cbs.remove(&req.id);
-        if cb.is_none() {
-            return;
-        }
-
         let mut resp = Response {
             id: req.id,
             op: req.op,
             ok: true,
             value: None,
         };
+
+        debug!("{} handle command {}", self.tag, req.op);
+
         match req.op {
             1 => {
                 if let Some(v) = self.db.get(&req.row.key).unwrap() {
@@ -183,7 +201,9 @@ impl Node {
             _ => unreachable!(),
         }
 
-        cb.unwrap()(resp);
+        if let Some(cb) = self.cbs.remove(&req.id) {
+            cb(resp);
+        }
     }
 }
 
