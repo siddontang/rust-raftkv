@@ -1,20 +1,38 @@
 #![feature(rustc_private)]
 #![feature(plugin, decl_macro)]
 #![plugin(rocket_codegen)]
+#![feature(fnbox)]
 
+extern crate byteorder;
 extern crate clap;
+extern crate crossbeam_channel;
 extern crate env_logger;
 #[macro_use]
 extern crate log;
+extern crate protobuf;
 extern crate raft;
+extern crate rand;
+extern crate reqwest;
 extern crate rocket;
-extern crate sled;
+extern crate rocksdb;
+extern crate serde;
+#[macro_use]
+extern crate serde_derive;
+extern crate serde_json;
+
+use std::sync::Arc;
+use std::collections::HashMap;
 
 use clap::{App, Arg};
-use sled::{ConfigBuilder, Tree};
-use raft::*;
+use rocksdb::DB;
 
 mod http;
+mod keys;
+mod storage;
+mod util;
+mod node;
+mod transport;
+
 use http::*;
 
 fn main() {
@@ -27,15 +45,6 @@ fn main() {
         .author("SiddonTang, <siddontang@gmail.com>")
         .about("a simple example to use raft in Rust")
         .arg(
-            Arg::with_name("port")
-                .short("P")
-                .long("port")
-                .value_name("20170")
-                .required(true)
-                .help("HTTP listening port")
-                .takes_value(true),
-        )
-        .arg(
             Arg::with_name("data")
                 .long("data")
                 .value_name("./data")
@@ -44,10 +53,11 @@ fn main() {
                 .takes_value(true),
         )
         .arg(
-            Arg::with_name("init_cluster")
-                .long("init_cluster")
-                .value_name("1=127.0.0.1:20170")
-                .help("Initialized Raft cluster")
+            Arg::with_name("cluster")
+                .long("cluster")
+                .value_name("1=127.0.0.1:20171,2=127.0.0.1:20172")
+                .help("Cluster configuration")
+                .required(true)
                 .takes_value(true),
         )
         .arg(
@@ -60,6 +70,36 @@ fn main() {
         )
         .get_matches();
 
-    let port = matches.value_of("port").unwrap().parse::<u16>().unwrap();
-    run_raft_server(port);
+    let id = matches.value_of("id").unwrap().parse::<u64>().unwrap();
+    if id == 0 {
+        panic!("id must > 0");
+    }
+
+    let data_path = matches.value_of("data").unwrap();
+    let db = Arc::new(DB::open_default(&data_path).unwrap());
+
+    let cluster = matches.value_of("cluster").unwrap();
+    let node_addrs = parse_cluster(cluster);
+
+    let addr = node_addrs.get(&id).unwrap().clone();
+    let nodes = node_addrs.keys().cloned().collect::<Vec<u64>>();
+    storage::try_init_cluster(&db, id, &nodes);
+
+    let items: Vec<&str> = addr.split(":").collect();
+    let port = items[1].parse::<u16>().unwrap();
+
+    error!("start server {}, listen {}", id, port);
+    run_raft_server(port, id, db, node_addrs);
+}
+
+fn parse_cluster(cluster: &str) -> HashMap<u64, String> {
+    let mut m = HashMap::new();
+    let items: Vec<&str> = cluster.split(",").collect();
+    for item in items {
+        let v: Vec<&str> = item.split("=").collect();
+        let id = v[0].parse::<u64>().unwrap();
+        m.insert(id, v[1].to_string());
+    }
+
+    m
 }

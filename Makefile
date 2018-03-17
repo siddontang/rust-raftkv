@@ -1,10 +1,12 @@
 all: format build
 
 build:
-	@cargo build 
+	@cargo +nightly build --release
+	@mkdir -p ./bin
+	@cp target/release/raftkv ./bin/raftkv
 
 format:
-	@cargo fmt -- --write-mode overwrite
+	@cargo fmt 
 
 clean:
 	@cargo clean
