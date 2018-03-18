@@ -5,7 +5,7 @@ use std::collections::HashMap;
 
 use crossbeam_channel::{Receiver, RecvTimeoutError};
 use raft::eraftpb::{EntryType, Message as RaftMessage};
-use raft::{self, Config, RawNode, SnapshotStatus};
+use raft::{self, Config, RawNode, SnapshotStatus, Storage as RaftStorage};
 use rocksdb::{Writable, WriteBatch, WriteOptions, DB};
 use serde::{Deserialize, Serialize};
 use serde_json;
@@ -16,6 +16,7 @@ use keys::*;
 use transport::*;
 
 // op: read 1, write 2, delete 3.
+// op: status 128
 #[derive(Serialize, Deserialize, Default)]
 pub struct Request {
     pub id: u64,
@@ -29,6 +30,17 @@ pub struct Response {
     pub ok: bool,
     pub op: u32,
     pub value: Option<Vec<u8>>,
+}
+
+#[derive(Serialize, Deserialize, Default)]
+pub struct Status {
+    pub leader_id: u64,
+    pub id: u64,
+    pub first_index: u64,
+    pub last_index: u64,
+    pub term: u64,
+    pub apply_index: u64,
+    pub commit_index: u64,
 }
 
 pub type RequestCallback = Box<FnBox(Response) + Send>;
@@ -82,10 +94,35 @@ impl Node {
         }
     }
 
+    fn handle_status(&self, request: Request, cb: RequestCallback) {
+        let raft_status = self.r.status();
+        let s = Status {
+            id: self.id,
+            leader_id: self.r.raft.leader_id,
+            first_index: self.r.get_store().first_index().unwrap(),
+            last_index: self.r.get_store().last_index().unwrap(),
+            apply_index: self.r.get_store().apply_index,
+            term: raft_status.hs.get_term(),
+            commit_index: raft_status.hs.get_commit(),
+        };
+
+        cb(Response {
+            id: request.id,
+            ok: false,
+            op: request.op,
+            value: Some(serde_json::to_vec(&s).unwrap()),
+        });
+    }
+
     pub fn on_msg(&mut self, msg: Msg) {
         match msg {
             Msg::Raft(m) => self.r.step(m).unwrap(),
             Msg::Propose { request, cb } => {
+                if request.op == 128 {
+                    self.handle_status(request, cb);
+                    return;
+                }
+
                 if self.r.raft.leader_id != self.id || self.cbs.contains_key(&request.id) {
                     cb(Response {
                         id: request.id,
@@ -169,6 +206,7 @@ impl Node {
             }
 
             if last_applying_idx > 0 {
+                self.r.mut_store().apply_index = last_applying_idx;
                 put_u64(&*self.db, RAFT_APPLY_INDEX_KEY, last_applying_idx);
             }
         }

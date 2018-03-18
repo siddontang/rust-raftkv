@@ -58,6 +58,18 @@ fn local_kv_get(state: State<RaftServer>, key: String) -> Result<String, NotFoun
     Err(NotFound(format!("{} is not found", key)))
 }
 
+#[get("/status")]
+fn status(state: State<RaftServer>) -> Vec<u8> {
+    let s = state;
+    let req = Request {
+        op: 128,
+        ..Default::default()
+    };
+
+    let resp = s.do_request(req);
+    resp.value.unwrap()
+}
+
 #[get("/kv/<key>")]
 fn kv_get(state: State<RaftServer>, key: String) -> Result<String, Custom<String>> {
     let s = state;
@@ -172,7 +184,15 @@ pub fn run_raft_server(port: u16, id: u64, db: Arc<DB>, nodes: HashMap<u64, Stri
     rocket::custom(cfg, false)
         .mount(
             "/",
-            routes![kv_get, kv_put, kv_post, kv_delete, raft_post, local_kv_get],
+            routes![
+                kv_get,
+                kv_put,
+                kv_post,
+                kv_delete,
+                raft_post,
+                local_kv_get,
+                status
+            ],
         )
         .manage(s)
         .launch();
