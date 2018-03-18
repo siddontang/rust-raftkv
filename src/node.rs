@@ -151,6 +151,14 @@ impl Node {
         let is_leader = self.r.raft.leader_id == self.id;
         let mut ready = self.r.ready();
 
+        if is_leader {
+            // Send Messages immediately if it is leader.
+            let msgs = ready.messages.drain(..);
+            for msg in msgs {
+                self.trans.send(msg.get_to(), msg);
+            }
+        }
+
         // There is a snapshot, we need to apply it.
         if !raft::is_empty_snap(&ready.snapshot) {
             debug!("{} begin to apply snapshot", self.tag);
